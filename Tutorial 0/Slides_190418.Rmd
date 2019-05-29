@@ -1820,3 +1820,6 @@ Meet problem? Please submit it to
 Slide at: [bit.ly/190418_mcsim]()
 ]
 
+```{r, include=FALSE}
+clear()
+```

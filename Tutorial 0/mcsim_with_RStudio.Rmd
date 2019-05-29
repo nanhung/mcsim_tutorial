@@ -192,3 +192,7 @@ You are welcome to submit your problem to
 - My GitHub repo (<https://github.com/nanhung/MCSim_under_R/issues>) 
 - GNU MCSim mailing list (<https://lists.gnu.org/mailman/listinfo/help-mcsim>).
 
+```{r, include=FALSE}
+clear()
+```
+
