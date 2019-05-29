@@ -7,10 +7,7 @@ output:
   xaringan::moon_reader:
     css: [default, metropolis, metropolis-fonts]
     nature:
-      beforeInit: "macros.js"
-      highlightStyle: github
-      highlightLines: true
-      countIncrementalSlides: false
+          highlightLines: true
 ---
 
 # Outline
@@ -515,7 +512,7 @@ plot(x)
 
 # pksensi 
 
-![:scale 88%](https://i.ibb.co/GpwGBPw/Screen-Shot-2019-05-13-at-2-40-54-PM.png)
+![](https://i.ibb.co/GpwGBPw/Screen-Shot-2019-05-13-at-2-40-54-PM.png)
 
 .pull-right[
 .footnote[https://nanhung.rbind.io/pksensi/]
