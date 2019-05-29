@@ -1,0 +1,552 @@
+---
+title: "Tutorial 2: Uncertainty and Sensitivity Analysis (Supplementary)"
+author: "Nan-Hung Hsieh"
+date: "2019/05/16 (update: `r Sys.Date()`)"
+output: 
+  html_document:
+  fig_caption: yes  
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+setwd('..')
+wd <- getwd()
+knitr::opts_knit$set(root.dir =  wd)
+```
+
+# 4 Example 2: PERC-PBPK model 
+
+```{r, include=FALSE}
+source("MCSim/function.R")
+```
+
+The list of R packages should be installed first to do the following testing. 
+
+```{R message=FALSE, warning=FALSE}
+library(tidyverse)
+library(sensitivity)
+library(pksensi)
+```
+
+## 4.1  Monte Carlo simulation in PERC-PBPK model
+
+0. Prepare the model ("perc.model.R") and input ("perc_mtc.in.R") files. There are two simulations, which are inhalation of 72 and 144 ppm with 4 hour exposure.
+
+1. Modeling
+
+```{r, eval=T}
+out <- mcsim(model = "perc.model.R", input = "perc_mtc.in.R", dir = "modeling/perc")
+```
+
+2. Data manipulate
+
+```{r, eval=T}
+vars <- names(out)
+sim1.1 <- which(vars == "C_exh_ug_1.1" | vars == "C_exh_ug_1.10")
+sim1.2 <- which(vars == "C_ven_1.1" | vars == "C_ven_1.8") 
+sim2.1 <- which(vars == "C_exh_ug_2.1" | vars == "C_exh_ug_2.10")
+sim2.2 <- which(vars == "C_ven_2.1" | vars == "C_ven_2.8")
+```
+
+3. Visualize
+
+```{r, eval=T}
+last.param <- which(names(out) == "Flow_pul")
+par(mfrow = c(4, 4), mar = c(2,2,4,1))
+for (i in 2:last.param){
+  hist(out[,i], main = names(out[i]), xlab = "")
+}
+```
+
+```{r, eval=T}
+ggPK <- function(data, index, time, ...){
+  X <- apply(data[,index[1]:index[2]], 2, quantile,  c(0.5, 0.025, 0.975))
+  dat <- t(X)
+  colnames(dat) <- c("median", "LCL", "UCL")
+  df <- as.data.frame(dat)
+  df$time <- time
+  ggplot(df, aes(x = time, y = median)) +
+    geom_ribbon(aes(ymin = LCL, ymax = UCL), fill = "grey70", alpha = 0.5) + 
+    geom_line() +
+    labs(...) +
+    scale_y_log10()
+}
+```
+
+
+```{r, eval=T}
+t_exh_ug <- c(239.9, 245, 270, 360, 1320, 2760, 4260, 5700, 8580, 10020)
+t_Ven <- c(239.9, 360, 1320, 2760, 4260, 5700, 8580, 10020)
+ggPK(data = out, index = sim1.1, time = t_exh_ug, x = "Time (min)", y = "mg/l in the exhaled air")
+ggPK(data = out, index = sim1.2, time = t_Ven, x = "Time (min)", y = "mg/l in the venous blood")
+ggPK(data = out, index = sim2.1, time = t_exh_ug, x = "Time (min)", y = "mg/l in the exhaled air")
+ggPK(data = out, index = sim2.2, time = t_Ven, x = "Time (min)", y = "mg/l in the venous blood")
+```
+
+## 4.2 Application of **pksensi** in Monte Carlo simulation 
+
+1. Set parameter distribution (assign `parms`, `dist`, `q.qarg`)
+
+```{r, eval=T}
+parameters <- c("LeanBodyWt","Pct_M_fat", "Pct_LM_liv", "Pct_LM_wp",
+                "Pct_Flow_fat", "Pct_Flow_liv", "Pct_Flow_pp",
+                "PC_fat", "PC_liv", "PC_wp", "PC_pp", "PC_art",
+                "Vent_Perf", "sc_Vmax", "Km", "Flow_pul")  
+dist <- rep("Uniform", 16) # MCSim definition
+q.arg<-list(list(50, 70),
+            list(0.2, 0.3),
+            list(0.03, 0.04),
+            list(0.25, 0.3),
+            list(0.06, 0.08),
+            list(0.2, 0.3),
+            list(0.2, 0.25),
+            list(110, 150),
+            list(5.0, 8.0),
+            list(5.0, 8.5),
+            list(1.6, 1.8),
+            list(12, 15),
+            list(0.8, 1.3),
+            list(0.04, 0.06),
+            list(7, 13),
+            list(7.4, 7.6))
+```
+
+2. Set experiment time-points, output variables, and conditions 
+
+```{r, eval=T}
+times <- c(239.9, 245, 270, 360, 1320, 2760, 4260, 5700, 8580, 10020)
+outputs <- c("C_exh_ug", "C_ven")
+conditions <- c("InhMag = 72", "Period = 1e10", "Exposure = 240")
+```                
+                
+3. Modeling
+
+```{r, eval=T}
+set.seed(2222)
+y<-solve_mcsim(mName = "perc.model.R", params = parameters, vars = outputs,
+               monte_carlo = 1000, dist = dist, q.arg = q.arg, time = times, 
+               condition = conditions)
+```
+
+4. Visualization
+
+```{r, fig.width=10, fig.height=3, eval=T}
+par(mfrow = c(1, 2), mar = c(2,3,1,1))
+pksim(y, vars = "C_exh_ug", log = T)
+pksim(y, vars = "C_ven", log = T)
+```
+
+## 4.3 Application of pksensi in sensitivity analysis
+
+1. Set parameter distribution (assign `parms`, `dist`, `q.qarg`)
+
+```{r, eval=T}
+parameters <- c("LeanBodyWt",
+                "Pct_M_fat", "Pct_LM_liv", "Pct_LM_wp","Pct_Flow_fat", "Pct_Flow_liv", "Pct_Flow_pp",
+                "PC_fat", "PC_liv", "PC_wp", "PC_pp", "PC_art",
+                "Vent_Perf", 
+                "sc_Vmax", "Km", 
+                "Flow_pul")  
+q <- "qunif"
+q.arg <- list(list(50, 70),
+            list(0.2, 0.3),
+            list(0.03, 0.04),
+            list(0.25, 0.3),
+            list(0.06, 0.08),
+            list(0.2, 0.3),
+            list(0.2, 0.25),
+            list(110, 150),
+            list(5.0, 8.0),
+            list(5.0, 8.5),
+            list(1.6, 1.8),
+            list(12, 15),
+            list(0.8, 1.3),
+            list(0.04, 0.06),
+            list(7, 13),
+            list(7.4, 7.6))
+```
+
+2. Generate parameter space
+
+```{r, eval=T}
+x <- rfast99(params = parameters, n = 2000, q = q, q.arg = q.arg, replicate = 1)
+dim(x$a)
+```
+
+
+3. Set experiment time-points, output variables, and conditions 
+
+```{r, eval=T}
+times <- c(239.9, 245, 270, 360, 1320, 2760, 4260, 5700, 8580, 10020)
+outputs <- c("C_exh_ug", "C_ven")
+conditions <- c("InhMag = 72", "Period = 1e10", "Exposure = 240")
+```
+
+4. Modeling
+
+```{r, eval=T}
+y <- solve_mcsim(x, mName = "perc.model.R", params = parameters, vars = outputs,
+                 time = times, condition = conditions)
+```
+
+5. Visualization & Decision
+
+
+```{r, eval=T}
+par(mfrow = c(4, 4), mar = c(2,2,4,1))
+for(i in 1:16){
+  hist(x$a[,,i])  
+}
+```
+
+
+```{r fig.height=8, fig.width=13, eval=T}
+plot(y)
+```
+
+```{r fig.height=8, fig.width=13, eval=T}
+plot(y, vars = 2)
+```
+
+
+```{r fig.height=7, fig.width=13, eval=T}
+heat_check(y) 
+```
+
+```{r, eval=T}
+check(y)
+```
+
+# 5 Exercise
+
+In the exercise 1 to 4, we'll use the `EB.model.R` to conduct Monte Carlo simulation and sensitivity analysis. 
+
+## 5.1 Monte Carlo simulation
+
+**Create the MCSim's input file ("EB_mtc.in.R") and run Monte Carlo simulation to conduct uncertainty analysis of EB concentration in blood (0 - 6 hr), the exposure condition is 100 ppm EB exposure for 4 hours.**
+
+```{r, eval=T}
+out <- mcsim(model = "EB.model.R", input = "EB_mtc.in.R", dir = "modeling/EB")
+head(out)
+```
+
+Data manipulate
+
+```{r, eval=T}
+vars <- names(out)
+index <- which(vars == "Cvtot_1.2" | vars == "Cvtot_1.61")
+time <- seq(0.1, 6, 0.1)
+MW <- 106.16 # g/mol
+X <- apply(out[,index[1]:index[2]], 2, quantile,  c(0.5, 0.01, 0.99))
+dat <- t(X) * MW * 1000
+colnames(dat) <- c("median", "LCL", "UCL")
+df <- as.data.frame(dat)
+df$time <- time
+head(df)
+```
+
+Plot
+
+```{r, eval=T}
+ggplot(df, aes(x = time, y = median)) +
+    geom_ribbon(aes(ymin = LCL, ymax = UCL), fill = "grey70", alpha = 0.5) + 
+    geom_line() 
+```
+
+## 5.2 Morris screening
+
+**At the same exposure condition, conduct Morris elementary effects screening method to find the influential parameters for blood concentration during the 2-hr post exposure.**
+
+1. Parameter setting
+
+```{r, eval=T}
+BW <- 0.043  
+
+Pb <- 42.7
+Pl <- 1.96
+Pf <- 36.4
+Pm <- 0.609
+Pvrg <- 1.96
+Ppu <- 1.96
+Pbr <- 1.96
+
+VmaxC <- 6.39
+VmaxClu <- 13.4
+VmaxCvr <- 17.4
+
+factors <- c("BW", "Pb", "Pl", "Pf", "Pm", "Pvrg", "Ppu", "Pbr", "VmaxC", "VmaxClu", "VmaxCvr")
+
+baseline <- c(BW, Pb, Pl, Pf, Pm, Pvrg, Ppu, Pbr, VmaxC, VmaxClu, VmaxCvr)
+limit <- c(1.2, rep(2, 7), rep(4, 3))
+binf <- baseline/limit
+bsup <- baseline*limit
+
+binf
+bsup
+```
+
+2. Generate parameter matrix
+
+```{r }
+set.seed(1234)
+x <- morris(model = NULL, factors = factors, r = 512,
+            design = list(type = "oat", levels = 5, grid.jump = 3),
+            binf = binf, bsup = bsup)
+X <- cbind(1, x$X)
+write.table(X, file = "setpts.out", row.names = F, sep = "\t")
+head(X)
+```
+
+3. Modeling
+
+```{r, eval=T}
+out <- mcsim(model = "EB.model.R",  input = "EB_setpts.in.R", dir = "modeling/EB")
+head(out)
+```
+
+4. Visualization
+
+```{r, eval=T}
+str <- which(names(out) == "Cvtot_1.1")
+end <- which(names(out) == "Cvtot_1.5")
+par(mfrow = c(2,3), mar = c(2,2,2,1))
+for (i in str:end){
+tell(x, out[,i])
+print(x)  
+plot(x,
+     main = paste("Time = ",4 + (i - str)*0.5, "hr"))  
+}
+```
+
+Convergence check
+
+```{r, eval=T}
+# Create data frame
+for (i in 3:11){
+  x <- morris(model = NULL, factors = factors, r = 2^i, 
+              design = list(type = "oat", levels = 6, grid.jump = 3), 
+              binf = binf, bsup = bsup)
+  dat <- cbind(1, x$X)
+  write.table(dat, file = "setpts.out", row.names = F, sep = "\t")
+  out <- mcsim(model = "EB.model.R",  input = "EB_setpts.in.R", dir = "modeling/EB")
+  
+  # Specific time point
+  y <- out$Cvtot_1.5
+  tell(x, y)
+  
+  if (i == 3){ X <- apply(abs(x$ee), 2, mean) } else X <- rbind(X, apply(abs(x$ee), 2, mean))
+}
+X
+
+# Plot
+ylim <- range(X)
+plot(X[,1], ylim = ylim, type = "b", xaxt = "n")
+axis(1, at = seq(3,11,2), labels = 2^seq(5,13,2))
+for(i in 2 :11){
+  lines(X[,i], type = "b")
+}
+```
+
+
+## 5.3 Fourier amplitude sensitivity testing
+
+**Use pksensi and conduct FAST method to find the non-influential parameter for blood concentrations.**
+
+```{R, eval=T}
+params <- c("BW", "Pb", "Pl", "Pf", "Pm", "Pvrg", "Ppu", "Pbr", "VmaxC", "VmaxClu", "VmaxCvr")
+q <- "qunif"
+q.arg <- list(list(min = 0.0358, max = 0.0516),
+              list(min = 21.35, max = 85.4),
+              list(min = 0.98, max = 3.92),
+              list(min = 18.2, max = 72.8),
+              list(min = 0.3045, max = 1.218),
+              list(min = 0.98, max = 3.92),
+              list(min = 0.98, max = 3.92),
+              list(min = 0.98, max = 3.92),
+              list(min = 1.5975, max = 25.56),
+              list(min = 3.35, max = 53.6),
+              list(min = 4.35, max = 69.6)) 
+```
+
+2. Generate parameter space
+
+```{r, eval=T}
+set.seed(1234)
+x <- rfast99(params, n = 8000, q = q, q.arg = q.arg, replicate = 1) # convergence size
+```
+
+```{r, eval=T}
+dim(x$a) # c(Evaluation, replication, parameters)
+```
+
+3. Set experiment time-points, output variables, and conditions 
+
+```{r, eval=T}
+var <- c("Cvtot")
+times <- c(4.0, 4.5, 5, 5.5, 6)
+condition <- c("Cppm = NDoses (2, 100, 0, 0, 4 )")
+```
+
+4. Modeling
+
+**Note:** There is a problem to define `rtol = 1e-11` and `atol = 1e-13`. Update pksensi to the latest version by `devtools::install_github("nanhung/pksensi")`
+
+```{r, eval=T}
+fast <- solve_mcsim(x, mName = "EB.model.R",  params = params, time = times,  vars = var, 
+                 condition = condition, rtol = 1e-11,atol = 1e-13)
+```
+
+5. Visualization and decision
+
+```{r, eval=T}
+plot(fast)
+```
+
+```{r, eval=T}
+pksim(fast)
+```
+
+```{r, eval=T}
+check(fast, SI.cutoff = 0.05)
+```
+
+```{r, eval=T}
+heat_check(fast, SI.cutoff = c(0.05, 0.09, 0.15))
+```
+
+
+## 5.4 Morris vs. FAST
+
+**Compare the sensitivity measures (first order, interaction, total order) for Morris (exercise 2) and FAST (exercise 4).**
+
+```{r, eval=T}
+set.seed(1234)
+morrx <- morris(model = NULL, factors = factors, r = 512,
+            design = list(type = "oat", levels = 5, grid.jump = 3),
+            binf = binf, bsup = bsup)
+X <- cbind(1, morrx$X)
+write.table(X, file = "setpts.out", row.names = F, sep = "\t")
+out <- mcsim(model = "EB.model.R",  input = "EB_setpts.in.R", dir = "modeling/EB")
+
+y <- "Cvtot_1.2"
+str <- which(names(out) == y)
+tell(morrx, out[,str])
+mu_star <- apply(abs(morrx$ee), 2, mean)
+mu_star
+```
+
+
+```{r, eval=T}
+fast$mSI
+dim(fast$mSI)
+```
+
+```{r, eval=T}
+plot(mu_star, fast$mSI[2,,1], ylim=c(0,1))
+abline(0.05, 0)
+```
+
+
+## 5.5 Acetaminophen-PBPK model
+
+**Reproduce the published result of acetaminophen-PBPK model by following the vignette in pksensi**. 
+
+https://nanhung.rbind.io/pksensi/articles/pbpk_apap.html
+
+0. Create & compile model file
+
+```{R, eval=T}
+pksensi::pbpk_apap_model()
+makemcsim(model = "pbpk_apap.model")
+```
+
+1. Define arguments
+```{r, eval=T}
+Tg <- log(0.23)
+Tp <- log(0.033)
+CYP_Km <- log(130)
+SULT_Km_apap <- log(300)
+SULT_Ki <- log(526)
+SULT_Km_paps <- log(0.5)
+UGT_Km <- log(6.0e3)
+UGT_Ki <- log(5.8e4)
+UGT_Km_GA <-log(0.5)
+Km_AG <- log(1.99e4)
+Km_AS <- log(2.29e4)
+
+rng <- 1.96 
+
+# Parameter distribution
+params <- c("lnTg", "lnTp", "lnCYP_Km","lnCYP_VmaxC",
+           "lnSULT_Km_apap","lnSULT_Ki","lnSULT_Km_paps","lnSULT_VmaxC",
+           "lnUGT_Km","lnUGT_Ki","lnUGT_Km_GA","lnUGT_VmaxC",
+           "lnKm_AG","lnVmax_AG","lnKm_AS","lnVmax_AS",
+           "lnkGA_syn","lnkPAPS_syn", "lnCLC_APAP","lnCLC_AG","lnCLC_AS")
+q <- "qunif"
+q.arg <-list(list(Tg-rng, Tg+rng),
+             list(Tp-rng, Tp+rng),
+             list(CYP_Km-rng, CYP_Km+rng),
+             list(-2., 5.),
+             list(SULT_Km_apap-rng, SULT_Km_apap+rng),
+             list(SULT_Ki-rng, SULT_Ki+rng),
+             list(SULT_Km_paps-rng, SULT_Km_paps+rng),
+             list(0, 10),
+             list(UGT_Km-rng, UGT_Km+rng),
+             list(UGT_Ki-rng, UGT_Ki+rng),
+             list(UGT_Km_GA-rng, UGT_Km_GA+rng),
+             list(0, 10),
+             list(Km_AG-rng, Km_AG+rng),
+             list(7., 15),
+             list(Km_AS-rng, Km_AS+rng),
+             list(7., 15),
+             list(0., 13),
+             list(0., 13),
+             list(-6., 1),
+             list(-6., 1),
+             list(-6., 1))
+
+# Mutivariate
+vars <- c("lnCPL_APAP_mcgL", "lnCPL_AG_mcgL", "lnCPL_AS_mcgL")
+times <- seq(from = 0.1, to = 12.1, by = 0.2)
+
+# Conditions
+conditions <- c("mgkg_flag = 1",
+                "OralExp_APAP = NDoses(2, 1, 0, 0, 0.001)",
+                "OralDose_APAP_mgkg = 20.0")
+```
+
+2. Generate Parameter space
+
+```{r, eval=T}
+set.seed(1234)
+x <- rfast99(params = params, n = 1000, q = q, q.arg = q.arg, replicate = 1) 
+```
+
+3. Modeling
+
+```{r, eval=T}
+system.time(out <- solve_mcsim(x, mName = "pbpk_apap.model", 
+                               params = params,
+                               vars = vars,
+                               time = times,
+                               condition = conditions))
+```
+
+
+4. Visualization & Decision
+
+```{r eval=T, fig.height=13, fig.width=13}
+plot(out, vars = "lnCPL_AG_mcgL")
+```
+
+```{r eval=T, fig.height=9, fig.width=9}
+heat_check(out)
+```
+
+```{r eval=T}
+check(out)
+```
+
+```{r, include=FALSE}
+clear()
+```

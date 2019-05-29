@@ -2,7 +2,7 @@
 title: "Tutorial 1: Walk-through of working models"
 subtitle: "<html><div style='float:left'></div><hr color='#EB811B' size=1px width=796px></html>"
 author: "Nan-Hung Hsieh"
-date: "April 25, 2019"
+date: "2019/04/25 (update: `r Sys.Date()`)"
 output:
   xaringan::moon_reader:
     css: [default, metropolis, metropolis-fonts]

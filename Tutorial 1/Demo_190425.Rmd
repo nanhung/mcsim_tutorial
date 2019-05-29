@@ -1,5 +1,5 @@
 ---
-title: "MCSim tutorial 1 - Walk-through of Working Models"
+title: "Tutorial 1 - Walk-through of Working Models"
 author: "Nan-Hung Hsieh"
 date: "2019/04/25 (update: `r Sys.Date()`)"
 output: 

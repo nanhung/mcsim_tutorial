@@ -1,0 +1,926 @@
+---
+title: "Tutorial 2: Uncertainty and Sensitivity Analysis"
+author: "Nan-Hung Hsieh"
+date: "2019/05/16 (update: `r Sys.Date()`)"
+output: 
+  html_document:
+  fig_caption: yes  
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+setwd('..')
+wd <- getwd()
+knitr::opts_knit$set(root.dir =  wd)
+```
+
+# 0 Prerequisites - packages
+
+```{r, include=FALSE}
+source("MCSim/function.R")
+```
+
+The list of R packages should be installed first to do the following testing. 
+
+```{R message=FALSE, warning=FALSE}
+# pkgs <- c("httk", "tidyverse", "sensitivity", "devtools")
+# install.packages(pkgs)
+# devtools::install_github("nanhung/pksensi")
+library(httk)
+library(tidyverse)
+library(sensitivity)
+library(pksensi)
+```
+
+Check the software package version that will be used in this example.
+
+```{r, eval=T}
+devtools::session_info()
+```
+
+```{r}
+mcsim_version()  
+```
+
+## MonteCarlo()
+
+Use `one_mtc.in.R` to conduct Monte Carlo analysis
+
+Modeling 
+```{R, eval=T}
+#
+out_mc <- mcsim(model = "one.model.R", input = "one_mtc.in.R") 
+out_mc
+```
+
+```{r}
+out_mc
+```
+
+## SetPoints()
+
+Use `one_setpts.in.R`to conduct setpoint analysis
+
+Modeling 
+
+```{R, eval=T}
+#
+out_sp <- mcsim("one.model.R", "one_setpts.in.R")
+out_sp
+```
+
+# 1 Example 1: 1-compartment model 
+
+In this section, we'll use 1-compartment model in **httk** package as the example to conduct uncertainty and sensitivity analysis. 
+
+The `parameterize_1comp()` provide the baseline value of parameters that needed in the 1-compartment model. The selected chemical in this case study is Bisphenol A.
+
+```{R warning=FALSE, eval=T}
+params <- parameterize_1comp(chem.name = "Bisphenol A")
+params
+```
+
+Select the parameters of molecular weight (`MW`), absorption fraction (`Fgutabs`), distribution volume (`Vdist`), absorption rate (`kgutabs`), and elimination rate (`kelim`) that will be used in uncertainty and sensitivity analysis.
+
+```{R, eval=T}
+MW <- params$MW
+Fgutabs <- params$Fgutabs * params$hepatic.bioavailability
+kgutabs <- params$kgutabs
+Vdist <- params$Vdist
+kelim <- params$kelim
+```
+
+
+## 1.1 Forward simulation 
+
+Use `solve1comp` to simulate the time-dependent concentration of BPA. The given daily dose is 1 mg/kg.
+
+```{R warning=FALSE, eval=T}
+# Time
+t <- seq(0, 20 ,0.1)
+# solve_1comp
+out <- solve_1comp(chem.name = "Bisphenol A", doses.per.day = 1, daily.dose = 1, times = t)
+data <- as.data.frame(out)
+```
+
+Plot the TK profile and add the mean css from `calc_analytic_css()` in httk and the maximum css through analytical solution. The equation of Css is
+
+$$Css=\frac{D \cdot Fgutabs}{kelim \cdot Vdist}$$
+
+```{R, eval=T}
+# Estimate css
+dose <- 1 / 1000 * MW # mg -> uM
+httk_css <- calc_analytic_css(chem.name = "Bisphenol A", model = "1compartment")
+sol_css <-  dose * Fgutabs / kelim / Vdist # Analytical solution of css
+
+# Plot result
+plot(data$time, data$Ccompartment, type = "l", main = "BPA (pbtk1cpt)",
+     xlab = "Time (day)", ylab = "Concentration (uM)")
+abline(h = sol_css, col = "red") # Maximum  
+abline(h = httk_css) # Mean
+```
+
+Use GNU MCSim's model ("pbtk1cpt.model.R") and input ("pbtk1cpt.in.R") files to solve the ODE and compare with httk's result.
+
+```{R, eval=T}
+out_mcsim <- mcsim(model = "pbtk1cpt.model.R", input = "pbtk1cpt.in.R", dir = "modeling/pbtk1cpt")
+```
+
+Plot result
+
+```{r, eval=T}
+plot(out_mcsim$Time, out_mcsim$Ccompartment, type = "l", main = "BPA",
+     xlab = "Time (hr)", ylab = "Concentration (uM)")
+
+# Add line 
+lines(data$time * 24, data$Ccompartment, col = "red")
+```
+
+## 1.2 Uncertainty analysis of Css 
+
+Consider the CV = 0.2 as uncertainty in volume of distribution and elimination rate constant. The range of absorption fraction in gut is setting at 0.8 to 1.0.
+
+### R 
+
+Use R function to generate the random sample based on the given sampling method. We assume the normal distribution for `Vdist` and `kelim`, and uniform distribution for `gutabs`.
+
+```{R, eval=T}
+Vdist_dist <- rnorm(n = 1000, mean = Vdist, sd = Vdist * 0.2) # CV = 0.2
+kelim_dist <- rnorm(n = 1000, mean = kelim, sd = kelim * 0.2) # CV = 0.2
+Fgutabs_dist <- runif(n = 1000, min = 0.8, max = 1.0)
+css_dist <- dose * Fgutabs_dist / kelim_dist / Vdist_dist 
+summary(css_dist)
+```
+
+Visualize the parameter distribution through histogram.
+
+```{R, eval=T}
+par(mfrow = c(2,2))
+hist(Vdist_dist)
+hist(kelim_dist)
+hist(Fgutabs_dist)
+hist(css_dist)
+```
+
+### MCSim 
+
+Run MC simulation by using model ("pbtk1cpt_css.model.R") and input ("pbtk1cpt_css_mtc.in.R") files.
+
+```{R, eval=T}
+out <- mcsim(model = "pbtk1cpt_css.model.R", input = "pbtk1cpt_css_mtc.in.R", dir = "modeling/pbtk1cpt")
+head(out)
+summary(out$css_1.1)
+```
+
+Visualize the parameter distribution through histogram.
+
+```{R, eval=T}
+par(mfrow = c(2,2))
+hist(out$Vdist)
+hist(out$kelim)
+hist(out$Fgutabs)
+hist(out$css_1.1)
+```
+
+Compare the results from R and MCSim
+
+```{R, eval=T}
+# The example of using pipeline
+# plot(density(css_dist))
+css_dist %>% density() %>% plot()
+out$css_1.1 %>% density() %>% lines(col = "red")
+```
+
+## 1.3 Uncertainty analysis of RTK modeling
+
+The statistic data is from He et al. (2009) reported that the background bisphenol A (BPA) levels in serum of a Chinese population without occupational exposure. Of the total of 952 subjects, the serum BPA levels was 2.84 μg/L (arithmetic mean) and 0.18 μg/L (geometric mean). The detectable rate was 17% with the detection limit of 0.39 μg/L.
+
+### R 
+
+Generate the lognormal distribution of Css 
+
+```{R, eval=T}
+Css <- rlnorm(n = 1000, meanlog = log(0.18/1000), sdlog = log(7)) # μg/L to mg/l
+exp(sd(log(Css))) # Geometric Standard deviation
+oral_equiv_dist <- Css * kelim_dist * Vdist_dist / Fgutabs_dist # mg/kg-d
+summary(oral_equiv_dist)
+```
+
+Make a histogram for oral equivalent distribution.
+
+```{R, eval=T}
+hist(oral_equiv_dist, main = "Predicted oral equivalent dose (mg/kg-d)")
+```
+
+Make a box plot
+
+```{r, eval=T}
+boxplot(oral_equiv_dist, log = "y", main = "Predicted oral equivalent dose (mg/kg-d)")
+```
+
+Plot the relationship between Css and oral equivalent dose. The detection rate and arithmetic mean are used to compare with "real" study data.
+
+```{R, eval=T}
+plot(Css, oral_equiv_dist, log = "xy", xlab = "Css (uM)", ylab = "oral equivalent dose (mg/kg-d)")
+abline(v = 0.31/1000) # Add line of "real" detection limit
+x <- subset(Css, Css > 0.31/1000)
+```
+
+```{R, eval=T}
+length(x)/1000 # detection rate
+mean(x) * 1000 # arithmetic mean
+```
+
+### MCSim
+
+In this part, we will apply the same approach through MCSim. First, use `mcsim()` for the model ("pbtk1cpt_rtk.model.R") and input ("pbtk1cpt_rtk.in.R") files. Use `set.seed()` to create reproducible result
+
+```{R, eval=T}
+set.seed(1234)
+out <- mcsim(model = "pbtk1cpt_rtk.model.R", input = "pbtk1cpt_rtk.in.R", dir = "modeling/pbtk1cpt")
+summary(out$Dose_1.1)
+```
+
+Then, make histograms of Css and oral equivalent does
+
+```{R, eval=T}
+par(mfrow = c(1,2))
+hist(out$Css)
+hist(out$Dose_1.1)
+```
+
+Plot the relationship between Css and oral equivalent dose. The detection rate and arithmetic mean are used to compare with "real" study data.
+
+```{R, eval=T}
+plot(out$Css, out$Dose_1.1, log = "xy", xlab = "Css (uM)", ylab = "oral equivalent dose (mg/kg-d)")
+abline(v = 0.31/1000) # detection limit
+x <- subset(out$Css, out$Css > 0.31/1000)
+DR_13 <- quantile(x, prob = 0.13)
+DR_13 * 1000 # ug/L
+abline(v = DR_13, col = "red") # 13 % Detection rate
+```
+
+```{r, eval=T}
+length(x)/1000 # Detection rate
+mean(x) * 1000 # arithmetic mean
+```
+
+Compare the simulations from R and MCSim
+
+```{R, eval=T}
+boxplot(out$Dose_1.1, oral_equiv_dist, log = "y", names = c("R","MCSim"))
+```
+
+The variation of 10 different simulations
+
+```{R, eval=F}
+for (i in 1:10)
+{
+  out <- mcsim("pbtk1cpt_rtk.model.R", "pbtk1cpt_rtk.in.R", dir = "modeling/pbtk1cpt")
+  x <- subset(out$Css, out$Css > 0.31/1000)
+  Detect.rate <- length(x)/1000 # Detection rate
+  Observ.mean <- mean(x) * 1000 # arithmetic mean
+  plot(out$Css, out$Dose_1.1, log = "xy", 
+       xlab = "Css (uM)", ylab = "oral equivalent dose (mg/kg-d)",
+       main = paste("Detection rate: ", round(Detect.rate, digit = 2), 
+                    "Observation mean: ", round(Observ.mean, digit = 2)))
+  abline(v = 0.31/1000) # detection limit
+  DL <- quantile(x, prob = 0.13)
+  abline(v = DL, col = "red") # 13 %
+  date_time<-Sys.time()
+  while((as.numeric(Sys.time()) - as.numeric(date_time))<1){} 
+}
+```
+
+## 1.4 Sensitivity analysis 
+
+Here we use two simple examples to explain the concept of sensitivity analysis for 
+Morris’s elementary effects screening method and Fourier amplitude sensitivity testing (FAST). The equations are defined as follows
+
+$$Y=X_{1}+X_{2}+X_{3}$$
+
+$$Y=X_{1} \cdot X_{2}/X_{3}$$
+
+where $X_i$ are uniformly distributed as follows
+
+$$X_1 \sim N(0,1)$$
+$$X_2 \sim N(1,4)$$
+$$X_3 \sim N(1,7)$$
+
+The defined functions are called `eqn_1()` and `eqn_2()`
+
+```{R, eval=T}
+eqn_1 <- function (X)
+{
+  X[, 1] + X[, 2] + X[, 3] # X1 + X2 + X3
+}
+eqn_2 <- function (X) 
+{
+  X[, 1] * X[, 2] / X[, 3] # X1 * X2 / X3
+}
+```
+
+### Morris method for `eqn_1()`
+
+The Morris method,based on design of experiments, allows to identify the few important factors at a cost of $r(p+ 1)$ simulations (where $p$ is the number of factors). $r$ is the number of repetitions of the design.
+
+Using `morris()` and setting the arguments. The distribution for X1, X2, and X3 are U(0,1), U(1,4), and U(1,7), respectively. 
+
+```{R, eval=T}
+set.seed(1234)
+x <- morris(model = eqn_1, factors = 3, r = 18, 
+            design = list(type = "oat", levels = 6, grid.jump = 3), 
+            binf = c(0, 1, 1), bsup = c(1, 4, 7))
+nrow(x$X) # Model evaluation
+#head(x$X)
+```
+
+Plotting sampling process
+
+```{r, eval=T}
+par(mfrow = c(3,1), mar = c(2,4,1,1))
+plot(x$X[, 1], xlab = "n", ylab = "x1")
+plot(x$X[, 2], ylab = "x2")
+plot(x$X[, 3], ylab = "x3")
+```
+
+Parameter distributions 
+
+```{R, eval=T}
+par(mfrow = c(1,3))
+for(i in 1:3){
+  hist(x$X[,i], main = colnames(x$X)[i])
+}
+```
+
+Visualize the relationship between parameters and model outputs
+
+```{R, eval=T}
+par(mfrow = c(1,3))
+for(i in 1:3){
+  cor <- cor(x$X[,i], x$y)
+  plot(x$X[,i], x$y, 
+       xlab = colnames(x$X)[i],
+       main = paste("r = ", round(cor, digits = 2)))
+}
+```
+
+The $\mu^*$ is the mean absolute value of elementary effect, representing the actual value from the output that was effected by specific parameter. The $\sigma$ is the standard deviation of elementary effect, which can also represent the interaction of the parameters.
+
+```{R, eval=T}
+plot(x)
+```
+
+Report
+
+```{R, eval=T}
+x
+```
+
+Analytical solution (first order)
+
+```{R, eval=T}
+1-0 # X1
+4-1 # X2
+7-1 # X3
+```
+
+### FAST for `eqn_1()`
+
+Using `fast99()` and setting the arguments. This method allows the estimation of first order and total Sobol indices for all the factors (alltogether $2p$ indices, where $p$ is the number of factors) at a total cost of $n \times p$ simulations. 
+
+Set parameter distribution
+
+```{R, eval=T}
+q <- "qunif"
+q.arg <- list(list(min = 0,  max = 1),
+              list(min = 1,  max = 4),
+              list(min = 1,  max = 7))
+```
+
+Using `fast99()` and setting the arguments 
+
+```{r, eval=T}
+x <- fast99(model = eqn_1, factors = 3, n = 128, # Need n = 1000 to converge 
+            q = q, q.arg = q.arg)
+```
+
+Plotting sampling process
+
+```{r, eval=T}
+par(mfrow = c(3,1), mar = c(2,2,1,1))
+plot(x$X[,1], type = "l")
+plot(x$X[,2], type = "l")
+plot(x$X[,3], type = "l")
+```
+
+Parameter distributions 
+
+```{R, eval=T}
+par(mfrow = c(1,3))
+for(i in 1:3){
+  hist(x$X[,i], main = colnames(x$X)[i])
+}
+```
+
+Visualize the relationship between parameters and model outputs
+
+```{R, eval=T}
+par(mfrow = c(1,3))
+for(i in 1:3){
+  cor <- cor(x$X[,i], x$y)
+  plot(x$X[,i], x$y, 
+       xlab = colnames(x$X)[i],
+       main = paste("r = ", round(cor, digits = 2)))
+}
+```
+
+Plot the sensitivity measurements
+
+```{R, eval=T}
+plot(x)
+```
+
+Report
+
+```{R, eval=T}
+x
+```
+
+
+Analytical solution
+```{R, eval=T}
+Total <- (1-0)^2 + (4-1)^2 + (7-1)^2
+```
+
+```{R, eval=T}
+1^2 / Total # S1
+3^2 / Total # S2
+6^2 / Total # S3
+```
+
+### Morris method for `eqn_2()` 
+
+Call `morris()` and use the same parameter setting as previous case.
+
+```{r, fig.width=10, fig.height=3, eval=T}
+set.seed(1234)
+x <- morris(model = eqn_2, factors = 3, r = 18, 
+            design = list(type = "oat", levels = 6, grid.jump = 3),
+            binf = c(0,1,1), bsup = c(1,4,7))
+nrow(x$X) # Model evaluation
+```
+
+Visualize the relationship between parameters and model outputs
+
+```{r, eval=T}
+par(mfrow = c(1,3))
+for(i in 1:3){
+  cor <- cor(x$X[,i], x$y)
+  plot(x$X[,i], x$y, 
+       xlab = colnames(x$X)[i],
+       main = paste("r = ", round(cor, digits = 2)))
+}
+```
+
+Plot the sensitivity measurements
+
+```{r, eval=T}
+plot(x, xlim = c(0,2), ylim = c(0,2))
+```
+
+Report
+
+```{r, eval=T}
+x
+```
+
+
+### FAST method for `eqn_2()` 
+
+```{r, eval=T}
+q <- "qunif"
+q.arg <- list(list(min = 0,  max = 1),
+              list(min = 1,  max = 4),
+              list(min = 1,  max = 7))
+```              
+
+Call `fast99()`
+
+```{r, fig.width=10, fig.height=3, eval=T}
+x <- fast99(model = eqn_2, factors = 3, n = 1000, q = q, q.arg = q.arg) #
+```
+
+Visualize the relationship between parameters and model outputs
+
+```{r, eval=T}
+par(mfrow = c(1,3))
+for(i in 1:3){
+  cor <- cor(x$X[,i], x$y)
+  plot(x$X[,i], x$y, 
+       xlab = colnames(x$X)[i],
+       main = paste("r = ", round(cor, digits = 2)))
+}
+```
+
+Plot the sensitivity measurements
+
+```{r, eval=T}
+plot(x)
+```
+
+Report
+
+```{r, eval=T}
+x
+```
+
+### Morris method of Css 
+
+Define the function to estimate the maximum concentration at steady-state (Css)
+
+```{r, eval=T}
+Css_fun <- function (X) 
+{
+  Dose <- 0.228 # Ingestion dose (uM)
+  Dose * X[, 1] / X[, 2] / X[, 3] # Fgutabs_dist / kelim_dist / Vdist_dist 
+}
+```
+
+Set parameter range, 
+
+```{r, eval=T}
+# The order of binf and bsup are c(Fgutabs, kelim, Vdist)
+binf <- c(0.8, kelim * 0.5, Vdist * 0.5)
+bsup <- c(1, kelim * 2, Vdist * 2)
+```
+
+Call `morris()`
+
+```{r, eval=T}
+set.seed(1234)
+x <- morris(model = Css_fun, factors = c("Fgutabs", "kelim", "Vdist"), r = 32, 
+            design = list(type = "oat", levels = 6, grid.jump = 3), 
+            binf = binf, bsup = bsup)
+```
+
+Visualize the relationship between parameters and model outputs
+
+```{r, eval=T}
+par(mfrow = c(1,3))
+for(i in 1:3){
+  cor <- cor(x$X[,i], x$y)
+  plot(x$X[,i], x$y, 
+       xlab = colnames(x$X)[i],
+       main = paste("r = ", round(cor, digits = 2)))
+}
+```
+
+Plot the sensitivity measurements
+
+```{r, eval=T}
+par(mfrow = c(1,1))
+plot(x, xlim = c(0, 5), ylim = c(0, 5))
+abline(0,1) # non-linear and/or non-monotonic
+abline(0,0.5, lty = 2) # monotonic
+abline(0,0.1, lty = 3) # almost linear
+legend("topleft", legend = c("non-linear and/or non-monotonic",
+                             "monotonic", "linear"), lty = c(1:3))
+```
+
+The stability testing
+
+```{r, eval=F}
+for (i in 1:10)
+{
+  x <- morris(model = Css_fun, factors = c("Fgutabs", "kelim", "Vdist"), r = 32, # test r = 32
+              design = list(type = "oat", levels = 6, grid.jump = 3), 
+              binf = binf, bsup = bsup)
+  plot(x, xlim = c(0, 6), ylim = c(0, 6))
+  abline(0,1) # non-linear and/or non-monotonic
+  abline(0,0.5, lty = 2) # monotonic
+  abline(0,0.1, lty = 3) # almost linear
+  legend("topleft", legend = c("non-linear and/or non-monotonic",
+                               "monotonic", "linear"), lty = c(1:3))
+  date_time<-Sys.time()
+  while((as.numeric(Sys.time()) - as.numeric(date_time))<1){} 
+}
+```
+
+The example of convergence diagnostics
+
+```{r warning=FALSE, eval=T}
+for (i in 3:11){
+  x <- morris(model = Css_fun, factors = c("Fgutabs", "kelim", "Vdist"), r = 2^i, # test r = 32
+              design = list(type = "oat", levels = 6, grid.jump = 3), 
+              binf = binf, bsup = bsup)
+  if (i == 3){ X <- apply(abs(x$ee), 2, mean) } else X <- rbind(X, apply(abs(x$ee), 2, mean))
+}
+X
+ylim <- range(X)
+plot(X[,1], ylim = ylim, type = "b", xaxt = "n")
+axis(1, at = seq(1,9,1), labels = 2^seq(3,11,1))
+lines(X[,2], type = "b")
+lines(X[,3], type = "b")
+```
+
+
+### FAST method of Css 
+
+Set parameter distribution
+
+```{r, eval=T}
+q <- "qunif"
+q.arg <- list(list(min = 0.8,  max = 1.0),
+              list(min = kelim * 0.5,  max = kelim * 2),
+              list(min = Vdist * 0.5,  max = Vdist * 2))
+```
+
+Call `fast99()`
+
+```{r, eval=T}
+x <- fast99(model = Css_fun, factors = c("Fgutabs", "kelim", "Vdist"), 
+            n = 500, q = q, q.arg = q.arg)
+```
+
+Visualize the relationship between parameters and model outputs
+
+```{r, eval=T}
+par(mfrow = c(1,3))
+for(i in 1:3){
+  cor <- cor(x$X[,i], x$y)
+  plot(x$X[,i], x$y, 
+       xlab = colnames(x$X)[i],
+       main = paste("r = ", round(cor, digits = 2)))
+}
+```
+
+Plot the sensitivity measurements
+
+```{r, eval=T}
+plot(x)
+```
+
+Report
+
+```{r, eval=T}
+x
+```
+
+The example of convergence diagnostics
+
+```{r, eval=T}
+for (i in 1:8){
+  x <- fast99(model = Css_fun, factors = c("Fgutabs", "kelim", "Vdist"), n = 2^(i+6),
+            q = q, q.arg = q.arg)
+  if (i == 1){ X <- 1 - x$Dt/x$V } else X <- rbind(X, 1 - x$Dt/x$V)
+}
+ylim <- range(X)
+X
+plot(X[,1], ylim = ylim, type = "b", xaxt = "n")
+axis(1, at = seq(1,8,1), labels = 2^seq(7,14,1))
+lines(X[,2], type = "b")
+lines(X[,3], type = "b")
+```
+
+
+# 2 Mutivariate toxicokinetic modeling 
+
+Instead of exams the sensitivity of single variables, this test case will use multi time points in uncertainty and sensitivity analysis.
+
+## 2.1 Uncertainty analysis
+
+In uncertainty analysis, Use model (`pbtk1cpt.model.R`) and input (`pbtk1cpt_mtc.in.R`) files to conduct Monte Carlo simulation.
+
+```{r, eval=T}
+out <- mcsim("pbtk1cpt.model.R", "pbtk1cpt_mtc.in.R", dir = "modeling/pbtk1cpt")
+head(out)
+```
+
+The format of output file can not be used to create TK profile directly. Therefore, we need to manipulate the output result to "tidy data" format.
+
+```{r, eval=T}
+# Find location of the first and last time points by which()
+index <- which(names(out)=="Ccompartment_1.1" | names(out)=="Ccompartment_1.24")
+# Use apply() to find the quantile of each time point
+X <- apply(out[,index[1]:index[2]], 2, quantile, c(0.5, 0.025,0.975))
+dat <- t(X)
+# Set column names
+colnames(dat) <- c("median", "LCL", "UCL")
+df <- as.data.frame(dat)
+# Set corresponding time
+df$time <- seq(0, 23, 1)
+df
+```
+
+Visualize
+```{r, eval=T}
+ggplot(df, aes(x = time, y = median)) +
+  geom_ribbon(aes(ymin = LCL, ymax = UCL), fill = "grey70", alpha = 0.5) + 
+  geom_line() +
+  labs(x = "Time (h)", y = "Concentration (uM)")
+```
+
+
+## 2.2 Sensitivity analysis
+
+
+### Setpoints method (Morris)
+
+Call `Morris()`
+
+```{r, eval=T}
+# The order of binf and bsup are c("Vdist", "kelim", "kgutabs", "Fgutabs")
+binf <- c(Vdist * 0.5, kelim * 0.5, kgutabs * 0.5, 0.8)
+bsup <- c(Vdist * 2, kelim * 2, kgutabs * 2, 1.0)
+set.seed(1234)
+x <- morris(model = NULL, factors = c("Vdist", "kelim", "kgutabs", "Fgutabs"), r = 32, 
+            design = list(type = "oat", levels = 6, grid.jump = 3), 
+            binf = binf, bsup = bsup)
+head(x$X)
+nrow(x$X)
+```
+
+Create the setpoints file `setpts.out`
+
+```{r, eval=T}
+X <- cbind(1, x$X)
+write.table(X, file = "setpts.out", row.names = F, sep = "\t")
+```
+
+Modeling
+
+```{r, eval=T}
+out <- mcsim("pbtk1cpt.model.R", "pbtk1cpt_setpts.in.R", dir = "modeling/pbtk1cpt")
+head(out)
+```
+
+Check the time-dependent sensitivity measures 
+
+```{r, eval=TF
+for(i in 2:24){
+  tell(x, out[,i+5])
+  plot(x, main = paste("Time = ", i-1, "hr"), 
+       xlim = c(0, 1), ylim = c(0, 1))
+  abline(0,1) # non-linear and/or non-monotonic
+  abline(0,0.5, lty = 2) # monotonic
+  abline(0,0.1, lty = 3) # almost linear
+  date_time<-Sys.time()
+  while((as.numeric(Sys.time()) - as.numeric(date_time))<0.5){} 
+}
+```
+
+
+Data manipulate (Transfer to tidydata format)
+
+```{r, eval=T}
+index <- which(names(out) == "Ccompartment_1.1" | names(out) == "Ccompartment_1.24")
+X <- apply(out[,index[1]:index[2]], 2, quantile,  c(0.5, 0.025, 0.975))
+dat <- t(X)
+colnames(dat) <- c("median", "LCL", "UCL")
+df <- as.data.frame(dat)
+df$time <- seq(0, 23, 1)
+head(df)
+```
+
+Visualization
+
+```{r, eval=T}
+ggplot(df, aes(x = time, y = median)) +
+  geom_ribbon(aes(ymin = LCL, ymax = UCL), fill = "grey70", alpha = 0.5) + 
+  geom_line()
+```
+
+
+# 3 **pksensi**
+
+## 3.1 Monte Carlo
+
+1. Set parameter distributions (assign `parms`, `dist`, `q.qarg`)
+
+```{r, eval=T}
+parameters <- c("Vdist","kelim", "kgutabs", "Fgutabs")  
+dist <- c("Normal_cv", "Normal_cv", "Normal_cv", "Uniform") # MCSim definition
+q.arg <- list(list(6.13, 0.2),
+            list(0.023, 0.2),
+            list(2.18, 0.2),
+            list(0.8, 1.0))
+```
+
+2. Set experiment time-points, output variables, and conditions 
+
+```{r, eval=T}
+outputs <- c("Ccompartment")
+times <- seq(0, 480, 1)
+conditions <- c("MW = 228.291", "Period = 24", "IngDose = 1.0")
+```
+
+3. Modeling
+
+```{r, eval=T}
+set.seed(2222)
+y<-solve_mcsim(mName = "pbtk1cpt.model.R", params = parameters, vars = outputs, monte_carlo = 1000,
+               dist = dist, q.arg = q.arg, time = times, condition = conditions)
+dim(y)
+
+# check input file
+```
+
+4. Visualization
+
+Plotting the Pk profile the x-axis is time (hr) and y-axis is concentration (uM)
+
+```{r, eval=T}
+pksim(y)
+```
+
+5. Report
+
+```{r, eval=T}
+summary(y)
+```
+
+## 3.1 FAST
+
+1. Set parameter distribution (assign `parms`, `dist`, `q.qarg`)
+
+```{R, eval=T}
+params <- c("Vdist","kelim", "kgutabs", "Fgutabs")  
+q <- "qunif"  # R definition
+q.arg <- list(list(min = Vdist * 0.5, max = Vdist * 2),
+              list(min = kelim * 0.5, max = kelim * 2),
+              list(min = kgutabs * 0.5, max = kgutabs * 2),
+              list(min = 0.8, max = 1)) 
+
+```
+
+2. Generate parameter space
+
+```{R, eval=T}
+set.seed(1234)
+x <- rfast99(params = params, n = 500, q = q, q.arg = q.arg, replicate = 5)
+```
+
+```{r, eval=T}
+dim(x$a) # c(Evaluation, replication, parameters)
+```
+
+```{r, eval=F}
+par(mfrow = c(4,1), mar = c(2,2,1,1), oma = c(1,1,2,1))
+for (i in 1:5)
+{
+  plot(x$a[,i,1], type = "l")
+  plot(x$a[,i,2], type = "l")
+  plot(x$a[,i,3], type = "l")
+  plot(x$a[,i,4], type = "l")  
+  mtext(paste("r =", i), NORTH<-3, line=0.4, cex=1.2, outer=TRUE)
+  date_time<-Sys.time()
+  while((as.numeric(Sys.time()) - as.numeric(date_time))<1){} 
+}
+```
+
+3. Set experiment time-points, output variables, and conditions 
+
+```{r, eval=T}
+outputs <- c("Ccompartment")
+times <- seq(432, 480, 1)
+conditions <- c("MW = 228.291", "Period = 24", "IngDose = 1.0")
+```
+
+4. Modeling
+
+```{R, eval=T}
+y <- solve_mcsim(x, mName = "pbtk1cpt.model.R",  params = params, time = times,  
+                 vars = outputs, condition = conditions)
+```
+
+
+5. Visualization and decision
+
+```{R, eval=T}
+plot(y)
+```
+
+```{R, eval=T}
+pksim(y)
+```
+
+```{R, eval=T}
+check(y)
+```
+
+# Reference
+
+He Y et al., (2009) [Bisphenol A levels in blood and urine in a Chinese population and the personal factors affecting the levels](https://doi.org/10.1016/j.envres.2009.04.003). Environmental Research 109(5): 629-33
+
+Hsieh N-H, Reisfeld B, Bois FY, Chiu WA. (2018) [Applying a Global Sensitivity Analysis Workflow to Improve the Computational Efficiencies in Physiologically-Based Pharmacokinetic Modeling](https://www.frontiersin.org/articles/10.3389/fphar.2018.00588/full). Frontiers in Pharmacology 9:588.
+
+Hsieh N-H, Reisfeld B, Chiu WA et al. (2019) [pksensi: Global Sensitivity Analysis in Pharmacokinetic Modeling](https://cran.r-project.org/web/packages/pksensi/index.html)
+
+Pujol, G., et al. (2018). [Sensitivity: Global Sensitivity Analysis of Model Outputs](https://cran.r-project.org/web/packages/sensitivity/index.html). 
+
+Wambaugh J., et al. (2019) [httk: High-Throughput Toxicokinetics](https://cran.r-project.org/web/packages/httk/index.html)
+
+```{r, include=FALSE}
+clear()
+```
