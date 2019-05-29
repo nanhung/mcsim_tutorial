@@ -5,7 +5,7 @@ author: "Nan-Hung Hsieh"
 date: "2019/05/16 (update: `r Sys.Date()`)"
 output:
   xaringan::moon_reader:
-    css: ["libs/remark-css-0.0.1/default.css", "libs/remark-css-0.0.1/metropolis.css", "libs/remark-css-0.0.1/metropolis-fonts.css"]
+    css: [default, metropolis, metropolis-fonts]
     nature:
       beforeInit: "macros.js"
       highlightStyle: github

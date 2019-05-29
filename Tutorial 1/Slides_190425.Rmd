@@ -1,5 +1,5 @@
 ---
-title: "Tutorial 1: Walk-through of working models"
+title: "GNU MCSim Tutorial 1: Walk-through of working models"
 subtitle: "<html><div style='float:left'></div><hr color='#EB811B' size=1px width=796px></html>"
 author: "Nan-Hung Hsieh"
 date: "2019/04/25 (update: `r Sys.Date()`)"

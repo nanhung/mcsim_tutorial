@@ -1,0 +1,695 @@
+---
+title: "GNU MCSim Tutorial 3"
+subtitle: "Markov Chain Monte Carlo Calibration<html><div style='float:left'></div><hr color='#EB811B' size=1px width=796px></html>"
+author: "Nan-Hung Hsieh"
+date: "2019/05/23 (update: `r Sys.Date()`)"
+output:
+  xaringan::moon_reader:
+    css: [default, metropolis, metropolis-fonts]
+    nature:
+      beforeInit: "macros.js"
+      highlightStyle: github
+      highlightLines: true
+      countIncrementalSlides: false
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+setwd('..')
+wd <- getwd()
+knitr::opts_knit$set(root.dir =  wd)
+```
+
+```{r, include=FALSE}
+source("MCSim/function.R")
+```
+
+# Outline
+
+## 1. Markov Chain Monte Carlo
+
+- Principle
+
+- Workflow
+
+## 2. `MCMC()`
+
+- Working with **GNU MCSim** & **R**
+
+- Example: linear model
+
+## 3. Demo
+
+- Individual modeling - Ethylbenzene PBPK
+
+- Population modeling - Tetrachloroethylene PBPK
+
+---
+
+# General workflow
+
+### 1 Model constructing or translating
+
+### 2 Verify modeling result
+
+- **Compare with published result**
+- **Mass balance** 
+
+### 3 Uncertainty and sensitivity analysis
+
+- **Morris elementary effects screening** 
+- **Fourier amplitude sensitivity test**
+
+### 4 Model calibration and validation
+
+- **Markov chain Monte Carlo** 
+  - Diagnostics (Goodness-of-fit, convergence)
+
+---
+
+# MC & MCMC
+
+## Monte Carlo
+
+### - Generate the probability distribution based on the given condition
+
+</br>
+
+## Markov Chain Monte Carlo
+
+### - Iterative update the probability distribution, if the new proposed distribution is accepted. 
+
+---
+
+# Bayes' rule
+
+.font200[
+$$ p(\theta|y) = \frac{p(\theta) p(y|\theta) }{p(y)}$$
+]
+
+$y$: **Observed data**
+
+$\theta$: **Observed or unobserved parameter**
+
+</br>
+
+$p(\theta)$: *Prior distribution* of model parameter
+
+$p(y|\theta)$: *Likelihood* of the experiment data given by a parameter vector
+
+$p(\theta|y)$: *Posterior distribution*
+
+$p(y)$: *Likelihood* of data
+
+---
+
+# Monty Hall Problem
+
+> Suppose you’re on a game show, and you’re given the choice of three doors. Behind one door is a car, behind the others, goats. You pick a door, say number 1, and the host, who knows what’s behind the doors, opens another door, say number 3, which has a goat. He says to you, ”Do you want to pick door number 2?” Is it to your advantage to switch your choice of doors?
+
+> Marilyn vos Savant. 1990. Ask Marilyn. *Parade Magazine*: 16.
+
+.pull-right[
+
+```{R echo=F, fig.height=7, fig.width=9}
+N <- 500
+set.seed(7)
+prize <- sample(1:3, N, replace = TRUE)
+stay <- sample(1:3, N, replace = TRUE)
+reveal <- rep(0, N)
+change <- rep(0, N)
+for(i in 1:N) {
+  x <- c(1:3)[-c(prize[i], stay[i])]
+  reveal[i] <- x[sample.int(length(x), size = 1)]
+  change[i] <- c(1:3)[-c(reveal[i], stay[i])]
+}
+changewin <- ifelse(change == prize, 1, 0)
+staywin <- ifelse(stay == prize, 1, 0)
+change_perc <- mean(changewin)
+stay_perc <- mean(staywin)
+plot(cumsum(changewin) / c(1:N), main = "'Convergence' to True Winning Proportions",
+     xlab = "Trial", ylab = "Win Percent", ylim = c(0, 1), col = "blue")
+abline(h = 2/3)
+points(cumsum(staywin) / c(1:N), type = "p", col = "red")
+abline(h = 1/3)
+legend("topright", legend = c("Switch to Other Door","Don't Switch"), pch = 1 , col = c(4,2))
+```
+
+]
+
+---
+
+# Markov Chain Monte Carlo
+
+.font120[
+- **Metropolis-Hastings sampling algorithm**
+]
+
+The algorithm was named for Nicholas Metropolis (physicist) and Wilfred Keith Hastings (statistician). The algorithm proceeds as follows.
+
+**Initialize**
+
+1. Pick an initial parameter sets $\theta_{t=0} = \{\theta_1, \theta_2, ... \theta_n\}$
+
+**Iterate**
+
+1. *Generate*: randomly generate a candidate parameter state $\theta^\prime$ for the next sample by picking from the conditional distribution  $J(\theta^\prime|\theta_t)$
+2. *Compute*:  compute the acceptance probability 
+$A\left(\theta^{\prime}, \theta_{t}\right)=\min \left(1, \frac{P\left(\theta^{\prime}\right)}{P\left(\theta_{t}\right)} \frac{J\left(\theta_{t} | \theta^{\prime}\right)}{J\left(\theta^{\prime} | \theta_{t}\right)}\right)$
+2. *Accept or Reject*:
+  1. generate a uniform random number $u \in[0,1]$
+  2. if $u \leq A\left(x^{\prime}, x_{t}\right)$ accept the new state and set $\theta_{t+1}=\theta^{\prime}$, otherwise reject the new state, and copy the old state forward $\theta_{t+1}=\theta_{t}$
+
+???
+
+Markov chain Monte Carlo is a general method based on drawing values of theta from approximate distributions and then correcting those draws to better approximate target posterior p(theta|y).
+
+---
+
+class: middle
+
+.font200[
+## The product of output is not ~~best-fit~~, but "prior" and "posterior".
+]
+
+---
+
+# log-likelihood
+
+The log-likelihood function was used to assess the **goodness-of-fit** of the model to the data ([Woodruff and Bois, 1993](https://www.sciencedirect.com/science/article/pii/0378427493901035?via%3Dihub), [Hsieh et al., 2018](https://www.frontiersin.org/articles/10.3389/fphar.2018.00588/full#B43))
+
+$$L L=\sum_{i=1}^{N}-\frac{1}{2} \cdot \frac{\left(y_{i}-\widehat{y}_{i}\right)^{2}}{S_{j[i]}^{2}}-\frac{1}{2} \ln \left(2 \pi s_{j[i]}^{2}\right)$$
+
+$N$: the total number of the data points 
+
+$y_i$: experimental observed
+
+$\hat{y}_i$: model predicted value
+
+$j[i]$: data type of data point $i$
+
+$S_{j[i]}^{2}$: the variance for data type $j$
+
+---
+
+# Calibration & evaluation
+
+###  Prepare model and input files 
+  - Need at least 4 chains in simulation
+
+### Check convergence & graph the output result
+  - **Parameter**, **log-likelihood of data**
+  - Trace plot, density plot, correlation matrix, auto-correlation, running mean, ...
+  - Gelman–Rubin convergence diagnostics
+
+### Evaluate the model fit
+  - Global evaluation
+  - Individual evaluation 
+
+---
+
+# Example: linear modeling
+
+.code60[
+
+.pull-left[
+
+**model-file**
+
+```r
+## linear.model.R ####
+
+Outputs = {y}
+
+# Model Parameters
+A = 0; # Default value of intercept
+B = 1; # Default value of slope
+
+# Statistical parameter
+SD_true = 0;
+
+CalcOutputs { 
+  y = A + B * t + NormalRandom(0,SD_true); 
+}
+End.
+
+```
+]
+
+.pull-right[
+
+**input-file**
+
+```r
+## ./mcsim.linear.model.R.exe linear_mcmc.in.R ####
+
+MCMC ("MCMC.default.out","", # name of output file
+     "",         # name of data file
+     2000,0,     # iterations, print predictions flag
+     1,2000,     # printing frequency, iters to print
+     10101010);  # random seed (default)
+
+Level {
+  
+  Distrib(A, Normal, 0, 2); # prior of intercept 
+  Distrib(B, Normal, 1, 2); # prior of slope 
+  
+  Likelihood(y, Normal, Prediction(y), 0.5);
+  
+  Simulation {
+    PrintStep (y, 0, 10, 1); 
+    Data (y, 0.0, 0.15, 2.32, 4.33, 4.61, 6.68, 7.89, 7.13, 7.27, 9.4, 10.0);
+  }
+}
+End.
+  
+```
+
+]
+]
+
+---
+
+# The data
+
+```{r fig.height=4.6, dev='svg'}
+x <- seq(0, 10, 1)
+y <- c(0.0, 0.15, 2.32, 4.33, 4.61, 6.68, 7.89, 7.13, 7.27, 9.4, 10.0)
+plot(x, y)
+```
+
+---
+
+# MCMC sampling process
+
+.font80[
+```{r, echo=F, message=F}
+model <- "linear.model.R"
+input <- "linear_mcmc.in.R"
+set.seed(1111) 
+out1 <- mcsim(model, input) 
+head(out1)
+```
+]
+
+.pull-left[
+
+**Trace plot**
+
+```{r, echo=F, fig.height=6, message=F}
+plot(out1$A.1., type = "l", xlab = "Iteration", ylab = "")
+lines(out1$B.1., col = 2)
+legend("topright", legend = c("Intercept", "Slope"), col = c(1,2), lty = 1)
+```
+
+]
+
+.pull-right[
+
+**Parameter space**
+
+```{r, echo=F, fig.height=6, message=F}
+plot(out1$A.1., out1$B.1., type = "b", xlab = "Intercept", ylab = "Slope")
+```
+
+]
+
+---
+
+# Trace plot
+
+```{r, echo=F, message=F}
+# Check convergence
+library(bayesplot)
+library(rstan)
+model <- "linear.model.R"
+input <- "linear_mcmc.in.R"
+set.seed(2234); out2 <- mcsim(model, input) # Generate the 2nd chain
+set.seed(3234); out3 <- mcsim(model, input) # Generate the 3rd chain
+set.seed(4234); out4 <- mcsim(model, input) # Generate the 4th chain
+sims <- mcmc_array(data = list(out1,out2,out3,out4))
+color_scheme_set("mix-blue-red")
+```
+
+```{r fig.height=5, fig.width=13, dev='svg'}
+parms_name <- c("A.1.","B.1.")
+mcmc_trace(sims, pars = parms_name, facet_args = list(ncol = 2))
+```
+
+---
+
+# Kernel density
+
+```{r fig.height=5, fig.width=13, dev='svg'}
+j <- c(1002:2001) # Discard first half as burn-in
+mcmc_dens_overlay(x = sims[j,,], pars = parms_name)
+```
+
+---
+
+# Pair plot
+
+```{r fig.height=7, fig.width=13, dev='svg'}
+mcmc_pairs(sims[j,,], pars = parms_name, off_diag_fun = "hex")
+```
+
+---
+
+# Summary report
+
+```{r}
+monitor(sims, probs = c(0.025, 0.975) , digit=4) 
+```
+
+---
+
+```{r, echo=F, warning=F, message=F}
+library(tidyverse)
+theme_set(theme_light())
+X <- sims[j,,] %>% matrix(nrow = 1000*4) 
+write.table(X, file = "setpts.out", row.names = F, sep = "\t")
+X_setpts <- mcsim("linear.model.R", "linear_setpts.in.R")
+```
+
+```{r, echo=F}
+vars <- names(X_setpts)
+index <- which(vars == "y_1.1" | vars == "y_1.11")
+X <- apply(X_setpts[index[1]:index[2]], 2, quantile,  c(0.5, 0.025, 0.975)) %>% t()
+colnames(X) <- c("median", "LCL", "UCL")
+df <- as.data.frame(X)
+x <- seq(0, 10, 1)
+df$x <- x
+y <- c(0.0, 0.15, 2.32, 4.33, 4.61, 6.68, 7.89, 7.13, 7.27, 9.4, 10.0)
+obs_data <- data.frame(x, y)
+```
+
+# Evaluation of model fit
+
+```{r echo=F, fig.height=7, fig.width=12, dev='svg'}
+ggplot(df, aes(x = x, y = median)) +
+    geom_ribbon(aes(ymin = LCL, ymax = UCL), fill = "grey70", alpha = 0.5) + 
+    geom_line() +
+    geom_point(data = obs_data, x=x, y=y) +
+    labs(x = "x", y = "y")
+```
+
+---
+
+# Demo - linear model
+
+## 1 Single chain testing
+
+- **MCMC simulation** 
+
+## 2 Multi-chains simulation
+
+- **Check convergence**
+
+- **Evaluation of model fit**
+
+---
+
+# MCMC()
+
+```r
+# Input-file
+
+MCMC();
+
+# <Global assignments and specifications>
+
+Level {
+
+  Distrib();  
+  Likelihood();
+
+  # Up to 10 levels of hierarchy
+  
+  Simulation {
+    # <Local assignments and specifications>
+  }
+  
+  Simulation {
+    # <Local assignments and specifications>
+  }
+  
+  # Unlimited number of simulation specifications
+} # end Level
+
+End.
+```
+
+---
+  
+# MCMC()
+
+The statement, gives general directives for MCMC simulations with following syntax:
+
+```r
+ MCMC("<OutputFilename>", "<RestartFilename>", "<DataFilename>",
+          <nRuns>, <simTypeFlag>, <printFrequency>, <itersToPrint>,
+          <RandomSeed>);
+```
+
+`"<OutputFilename>"` Output file name, the default is "MCMC.default.out"
+
+`"<RestartFilename>"` Restart file name
+
+`"<DataFilename>"` Data file name
+
+`<nRuns>` an integer for the total sampling number (iteration)
+
+`<simTypeFlag>` an integer (from 0 to 5) to define the simulation type
+
+`<printFrequency>` an integer to set the interval of printed output 
+
+`<itersToPrint>` an integer to set the number of printed output from the final iteration 
+
+`<RandomSeed>` a numeric for pseudo-random number generator
+
+---
+
+# Simulation types
+
+**`<simTypeFlag>` an integer (from 0 to 5) to define the simulation type**
+
+`0`, start/restart a new or unfinished MCMC simulations
+
+`1`, use the last MCMC iteration to quickly check the model fit to the data
+
+`2`, improve computational speed when convergence is approximately obtained
+
+`3`, tempering MCMC with whole posterior
+ 
+`4`, tempering MCMC with only likelihood
+ 
+`5`,  stochastic optimization 
+
+---
+
+# Check convergence
+
+### Manipulate (MCSim under R)
+
+`mcmc_array()`
+
+### Visualize (**bayesplot**, **corrplot**)
+
+`mcmc_trace()`  
+
+`mcmc_dens_overlay()`  
+
+`mcmc_pairs()`  
+
+`corrplot()`
+
+### Report (**rstan**)
+
+`monitor()`  
+
+---
+
+# Parallel
+
+![](https://i.ibb.co/b25QF2z/Screen-Shot-2019-05-20-at-3-08-17-PM.png)
+
+---
+
+# Demo - Ethylbenzene PBPK Model
+
+### Model verification (tutorial 1)
+
+**- Compare the simulated result with previous study**
+
+### Uncertainty analysis (tutorial 2)
+
+**- Set the probability distribution for model parameters**
+
+### Morris elementary effects screening (tutorial 2)
+
+**- Find the influential parameters**
+
+### MCMC calibration (tutorial 3)
+
+**- Estimate the "posterior"**
+
+---
+
+background-image: url(https://i.ibb.co/q5vKKjJ/Screen-Shot-2019-05-13-at-4-43-31-PM.png)
+background-size: 400px
+background-position: 70% 30% 
+
+# Bayesian Population Model
+
+.large[**Individuals level**]
+
+$E$: Exposure  
+
+$t$: Time  
+
+$\varphi$: measured parameters
+
+$\theta$: unknown parameters  
+
+$y$: condition the data
+
+</br>
+
+.large[**Population level**]
+
+$\mu$: Population means
+
+$\Sigma^2$: Population variances
+
+$\sigma^2$: Residual errors
+
+.pull-right[
+.footnote[
+https://doi.org/10.1007/s002040050284
+]
+]
+
+---
+
+# Population modeling
+
+.code60[
+
+.pull-left[
+
+**Single level**
+
+```r
+# Comments of Input-file
+<Global assignments and specifications>
+  
+  Level { # priors on population parameters
+    
+    Distrib ()
+    Likelihood ()
+    
+    Level { # all subjects grouped
+      
+        Experiment { # 1 
+          <Specifications and data in 1st simulation>
+        } # end 1 
+        Experiment { # 2
+          <Specifications and data in 2nd simulation>
+        } # end 2
+
+      # ... put other experiments
+      
+    } # End grouped level  
+  } # End population level
+End. 
+```    
+
+]
+
+.pull-right[
+
+**Multi level**
+
+```r
+# Comments of Input-file
+<Global assignments and specifications>
+  
+  Level { # priors on population parameters
+    
+    Distrib ()
+    Likelihood ()
+    
+    Level { # individuals
+      
+      Distrib ()
+      
+      Level { # subject A
+        Experiment { # 1 
+          <Specifications and data in 1st simulation>
+        } # end 1 
+        Experiment { # 2
+          <Specifications and data in 2nd simulation>
+        } # end 2
+      } # End subject A
+      
+      # ... put other subjects
+      
+    } # End individuals level  
+  } # End population level
+End. 
+```    
+]
+
+]
+
+---
+
+# Demo - Tetrachloroethylene PBPK Model
+
+## 1 Single level 
+
+- Population-experiments
+
+## 2 Multi level
+
+- Population-individuals-experiments
+
+---
+
+# Final thoughts
+
+MCMC simulation is a computational intensive process for metamodel or big data, one of the important issue today is how to improve the efficiency in the modeling.
+
+- If possible, remove or turn-off unnecessary state variable (e.g., mass balance, metabolites). 
+
+- Re-parameterization ([Chiu et al., 2006](https://rd.springer.com/article/10.1007/s00204-006-0061-9))
+
+- Global sensitivity analysis and parameter fixing ([Hsieh et al., 2018](https://www.frontiersin.org/articles/10.3389/fphar.2018.00588/full))
+
+- Parallel computing
+
+- Grouped data
+
+- Algorithm
+
+- Software, hardware, ...
+
+---
+
+class: inverse, center, middle
+
+# Thanks!
+
+</br>
+
+question? 
+
+
+.footnote[
+The slide, code, and record can find on my website: [nanhung.rbind.io](https://nanhung.rbind.io/talk/)
+]
+
+```{r, include=FALSE}
+clear()
+```
+

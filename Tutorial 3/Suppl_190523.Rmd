@@ -1,0 +1,387 @@
+---
+title: "Tutorial 3 - Markov chain Monte Carlo Calibration (Supplementary)"
+author: "Nan-Hung Hsieh"
+date: "2019/05/23 (update: `r Sys.Date()`)"
+output: 
+  html_document:
+  fig_caption: yes  
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+setwd('..')
+wd <- getwd()
+knitr::opts_knit$set(root.dir =  wd)
+```
+
+
+```{R message=FALSE, warning=FALSE}
+library(tidyverse)
+library(rstan)
+library(bayesplot)
+library(corrplot)
+library(sensitivity)
+library(pksensi)
+theme_set(theme_light())
+```
+
+```{r, include=FALSE}
+source("MCSim/function.R")
+```
+
+# 3 Tetrachloroethylene PBPK Model  
+
+Prepare [**model**](https://raw.githubusercontent.com/nanhung/MCSim_under_R/master/modeling/perc/perc.model.R) (`perc.model.R`) and [**input**](https://raw.githubusercontent.com/nanhung/MCSim_under_R/master/modeling/perc/perc_mcmc.in.R) (`perc_mcmc.in.R`) files. This input file  contains MCMC simulation descriptions based on Monster et al. (1989) paper. The  study measured the TCE in blood (`C_ven`) and exhaled air (`C_exh_ug`) for a group of 6 subjects exposed to two different concentrations (72 and 144 ppm) of TCE in air.
+
+## 3.1 Single level modeling
+
+### 3.1.1 Single chain testing
+
+**Modeling**
+
+```{r}
+model <- "perc.model.R"
+input <- "perc_mcmc.in.R"   
+set.seed(1234)
+system.time(out_1 <- mcsim(model, input, dir = "modeling/perc"))
+head(out_1)
+```
+
+**Diagnosis**
+
+```{r}
+str <- ceiling(nrow(out_1)/2) + 1
+end <- nrow(out_1)
+j <- c(str:end) # discard burn-in
+plot(out_1$iter[j], out_1$sc_Vmax.1.[j], type = "l")
+plot(out_1$iter[j], out_1$Km.1.[j], type = "l")
+```
+
+```{r}
+out_1$sc_Vmax.1.[j] %>% density %>% plot()
+out_1$Km.1.[j] %>% density() %>% plot()
+```
+
+
+```{r}
+par(mfrow = c(1,2), mar = c(4,4,3,1))
+acf(out_1$sc_Vmax.1.[j])
+acf(out_1$Km.1.[j])
+```
+
+```{r}
+cor <- cor(out_1$sc_Vmax.1.[j], out_1$Km.1.[j])
+plot(out_1$sc_Vmax.1.[j], out_1$Km.1.[j],
+     main = paste("r = ", round(cor, digits = 3)))
+```
+
+**Checking model fit**
+
+1. Global evaluation
+
+```{r}
+chk_1 <- read.delim("MCMC.check.out")
+tail(chk_1)
+```
+
+For multi level simulation, the "Level" column include **"population-experiments"**
+
+```{r}
+R_square <- cor(chk_1$Data, chk_1$Prediction)^2
+plot(chk_1$Data, chk_1$Prediction, log = "xy",
+     xlim = c(0.001, 1000), ylim = c(0.001, 1000),
+     xlab = "Observation", ylab = "Prediction",
+     main = paste("R2 =", round(R_square, digits = 3)))
+abline(0,1)
+```
+
+2. Individual evaluation 
+
+(1) Concentration in venous blood
+
+```{r}
+chk_1 %>% filter(Output_Var == "C_ven") %>%
+ggplot(aes(x = Time, y = Data)) +
+  geom_point() + 
+  geom_line(aes(y = Prediction))+
+  facet_wrap(~Simulation) +
+  scale_y_log10() + 
+  labs(x = "Time (min)", y = "Concentration (mg/L)", title = "Concentration in venous blood")
+```
+
+(2) Concentration in exhaled air
+
+```{r}
+chk_1 %>% filter(Output_Var == "C_exh_ug") %>%
+ggplot(aes(x = Time, y = Data)) +
+  geom_point() + 
+  geom_line(aes(y = Prediction))+
+  facet_wrap(~Simulation) +
+  scale_y_log10() + 
+  labs(x = "Time (min)", y = "Concentration (ug/L)", title = "Concentration exhaled air")
+```
+
+
+### 3.1.2 Checking convergence and model fit with multi chains
+
+**Checking convergence**
+
+```{r}
+model <- "perc.model.R"
+input <- "perc_mcmc.in.R"   
+set.seed(2345)
+out_1_2 <- mcsim(model, input, dir = "modeling/perc")
+set.seed(3344)
+out_1_3 <- mcsim(model, input, dir = "modeling/perc")
+set.seed(4455)
+out_1_4 <- mcsim(model, input, dir = "modeling/perc")
+```
+
+```{r}
+x <- mcmc_array(list(out_1, out_1_2, out_1_3, out_1_4))
+```
+
+```{r}
+parms <- c("sc_Vmax.1.", "Km.1.")
+mcmc_dens_overlay(x[j,,], pars = parms)
+mcmc_trace(x[j,,], pars = parms)
+```
+
+```{r}
+monitor(x, digits = 4)
+```
+
+**Evaluation of model fit**
+
+1. Setpoints analysis
+
+```{r}
+X <- x[j,,] %>% matrix(nrow = 16000) 
+write.table(X, file = "setpts.out", row.names = F, sep = "\t")
+X_setpts <- mcsim("perc.model.R", "perc_setpts.in.R", dir = "modeling/perc")
+```
+
+2. Tidy data with median and 95% confidence interval
+
+```{r}
+vars <- names(X_setpts)
+index <- which(vars == "C_exh_ug_1.1" | vars == "C_ven_12.7")
+X <- apply(X_setpts[index[1]:index[2]], 2, quantile,  c(0.5, 0.025, 0.975)) %>% t()
+colnames(X) <- c("median", "LCL", "UCL")
+df <- as.data.frame(X)
+chk_1$med <- df$median
+chk_1$LCL <- df$LCL
+chk_1$UCL <- df$UCL
+```
+
+3. Plot result
+
+```{r, warning=F}
+chk_1 %>% filter(Output_Var == "C_ven") %>%
+ggplot(aes(x = Time, y = Data)) +
+  geom_point() + 
+  geom_ribbon(aes(ymin = LCL, ymax = UCL), fill = "grey70", alpha = 0.5) +
+  geom_line(aes(y = med)) +
+  facet_wrap(~Simulation) +
+  scale_y_log10() + 
+  labs(x = "Time (min)", y = "Concentration (mg/L)", title = "Concentration in venous blood")
+```
+
+**Note:** The 95% confidence interval is too narrow for visual observing.
+
+## 3.2 Hierarchical modeling
+
+### 3.2.1 Single chain testing
+
+**Modeling**
+
+```{r}
+model <- "perc.model.R"
+input <- "perc_mcmc-hier.in.R"   
+set.seed(1234)
+system.time(out_2 <- mcsim(model, input, dir = "modeling/perc"))
+head(out_2)
+```
+
+**Diagnosis**
+
+(1) Trace plot
+
+```{r}
+str <- ceiling(nrow(out_2)/2) + 1
+end <- nrow(out_2)
+j <- c(str:end) # discard burn-in
+plot(out_2$iter[j], out_2$sc_Vmax.1.[j], type = "l")
+plot(out_2$iter[j], out_2$Km.1.[j], type = "l")
+```
+
+(2) Kernel plot
+
+```{r}
+out_2$sc_Vmax.1.[j] %>% density %>% plot()
+out_2$Km.1.[j] %>% density() %>% plot()
+```
+
+(3) Auto-correlation plot
+
+```{r}
+par(mfrow = c(1,2), mar = c(4,4,3,1))
+acf(out_2$sc_Vmax.1.[j])
+acf(out_2$Km.1.[j])
+```
+
+(4) Pair plot
+
+```{r}
+cor_2 <- cor(out_2$Km.1.[j], out_2$sc_Vmax.1.[j])
+plot(out_2$Km.1.[j], out_2$sc_Vmax.1.[j], 
+     xlab = "Km", ylab = "Vmax",
+     main = paste("r =", round(cor_2, digits = 3)))
+```
+
+**Evaluation of model fit**
+
+```{r}
+chk_2 <- read.delim("MCMC.check.out")
+```
+
+Compare the different between single and multi level
+
+For multi level simulation, the "Level" column include **"population-individuals-experiments"**
+
+```{r}
+tail(chk_1)
+tail(chk_2)
+```
+
+
+1. Global evaluation
+
+```{r}
+R_square <- cor(chk_2$Data, chk_2$Prediction)^2
+plot(chk_2$Data, chk_2$Prediction, log = "xy",
+     xlim = c(0.001, 1000), ylim = c(0.001, 1000),
+     xlab = "Observation", ylab = "Prediction",
+     main = paste("R2 =", round(R_square, digits = 3)))
+abline(0,1)
+```
+
+2. Individual evaluation
+
+```{r}
+chk_2 %>% 
+  separate(col = Level, c("Pop", "Subj", "Exp")) %>% 
+  filter(Output_Var == "C_ven") %>%
+ggplot(aes(x = Time, y = Data)) +
+  geom_point() + 
+  geom_line(aes(y = Prediction))+
+  facet_grid(Exp~Subj) +
+  scale_y_log10() + 
+  labs(x = "Time (min)", y = "Concentration (mg/L)", title = "Concentration venous blood")
+```
+
+
+### 3.2.2 Checking convergence and model fit with multi chains
+
+```{r}
+model <- "perc.model.R"
+input <- "perc_mcmc-hier.in.R"
+set.seed(2345)
+out_2_2 <- mcsim(model, input, dir = "modeling/perc")
+set.seed(3344)
+out_2_3 <- mcsim(model, input, dir = "modeling/perc")
+set.seed(4444)
+out_2_4 <- mcsim(model, input, dir = "modeling/perc")
+```
+
+```{r}
+x <- mcmc_array(list(out_2, out_2_2, out_2_3, out_2_4))
+```
+
+**Diagnosis**
+
+```{r, eval=F}
+parms <- c("sc_Vmax.1.", "Km.1.", "sc_Vmax.1.1.", "Km.1.1.", "sc_Vmax.1.2.",
+           "Km.1.2.", "sc_Vmax.1.3.", "Km.1.3.", "sc_Vmax.1.4.", "Km.1.4.", "sc_Vmax.1.5.",
+           "Km.1.5.", "sc_Vmax.1.6.", "Km.1.6.")
+mcmc_dens_overlay(x[j,,], pars = parms)
+mcmc_trace(x[j,,], pars = parms)
+```
+
+```{r}
+monitor(x, digits = 4)
+```
+
+**Evaluation of model fit**
+
+1. Setpoints analysis
+
+```{r}
+
+X <- x[j,,] %>% matrix(nrow = 16000) 
+write.table(X, file = "setpts.out", row.names = F, sep = "\t")
+X_setpts <- mcsim("perc.model.R", "perc_setpts.in.R", dir = "modeling/perc")
+```
+
+2. Tidy data with median and 95% confidence interval
+
+```{r}
+vars <- names(X_setpts)
+index <- which(vars == "C_exh_ug_1.1" | vars == "C_ven_12.7")
+X <- apply(X_setpts[index[1]:index[2]], 2, quantile,  c(0.5, 0.025, 0.975)) %>% t()
+colnames(X) <- c("median", "LCL", "UCL")
+df <- as.data.frame(X)
+chk_2$med <- df$median
+chk_2$LCL <- df$LCL
+chk_2$UCL <- df$UCL
+```
+
+3. Plot result
+
+```{r, warning=F}
+chk_2 %>% filter(Output_Var == "C_ven") %>%
+ggplot(aes(x = Time, y = Data)) +
+  geom_point() + 
+  geom_ribbon(aes(ymin = LCL, ymax = UCL), fill = "grey70", alpha = 0.5) +
+  geom_line(aes(y = med)) +
+  facet_wrap(~Simulation) +
+  scale_y_log10() + 
+  labs(x = "Time (min)", y = "Concentration (mg/L)", title = "Concentration in venous blood")
+```
+
+
+## 3.3 Parallel computing
+
+**How how many threads your CPU has?**
+
+```{r, eval=F}
+parallel::detectCores()
+```
+
+
+**Parallel computing**
+
+Prepare the job file first, the example job file is put into "examples/perc_job.R".
+
+Set `importEnv = T` to assign the random seed to the job. The `exportEnv` is used to assign the name of object to store the output data.
+
+
+```{r, eval=F}
+library(rstudioapi)
+set.seed(1234)
+jobRunScript(workingDir = getwd(), path = "examples/perc_job.R", importEnv = T, exportEnv = "job_1")
+set.seed(2345)
+jobRunScript(workingDir = getwd(), path = "examples/perc_job.R", importEnv = T, exportEnv = "job_2")
+set.seed(3344)
+jobRunScript(workingDir = getwd(), path = "examples/perc_job.R", importEnv = T, exportEnv = "job_3")
+set.seed(4444)
+jobRunScript(workingDir = getwd(), path = "examples/perc_job.R", importEnv = T, exportEnv = "job_4")
+```
+
+```{r, eval=F}
+x <- mcmc_array(list(job_1$out_2, job_2$out_2, job_3$out_2, job_4$out_2))
+```
+
+```{r, include=FALSE}
+clear()
+```
