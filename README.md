@@ -1,5 +1,4 @@
-
-[**DOWNLOAD**](https://github.com/nanhung/mcsim_tutorial/archive/v1.0.0.zip)
+# [**DOWNLOAD**](https://github.com/nanhung/mcsim_tutorial/archive/v1.0.0.zip)
 
 ## Instrction
 
@@ -36,8 +35,8 @@ Tutorial 1: Walk-through of working models
 
 Tutorial 2: Uncertainty and senitivity analysis
 
-[Slides](https://nanhung.rbind.io/slide/190516_tutorial.html#1) [Demo](https://rpubs.com/Nanhung/Demo_190516) [Supplementary](https://rpubs.com/Nanhung/Suppl_190516)
+[Slides](https://nanhung.rbind.io/slide/190516_tutorial.html#1) [Demo](https://rpubs.com/Nanhung/Demo_190516) [Supplementary](https://rpubs.com/Nanhung/Suppl_190516) [Record](https://vimeo.com/336693424)
 
 Tutorial 3: Markov Chain Monte Marlo Calibration
 
-[Slides](https://nanhung.rbind.io/slide/190523_tutorial.html#1) [Demo](https://rpubs.com/Nanhung/Demo_190523) [Supplementary](https://rpubs.com/Nanhung/Suppl_190523)
+[Slides](https://nanhung.rbind.io/slide/190523_tutorial.html#1) [Demo](https://rpubs.com/Nanhung/Demo_190523) [Supplementary](https://rpubs.com/Nanhung/Suppl_190523) [Record](https://vimeo.com/338106631)
