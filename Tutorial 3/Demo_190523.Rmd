@@ -555,7 +555,7 @@ set.seed(2233)
 out2 <- mcsim(model = "EB.model.R", input = "EB_mcmc.in.R", dir = "modeling/EB")
 set.seed(3344)
 out3 <- mcsim(model = "EB.model.R", input = "EB_mcmc.in.R", dir = "modeling/EB")
-set.seed(4455)
+set.seed(4456)
 out4 <- mcsim(model = "EB.model.R", input = "EB_mcmc.in.R", dir = "modeling/EB")
 ```
 
@@ -669,7 +669,6 @@ Check the software package version that will be used in this example.
 
 ```{r, eval=T}
 devtools::session_info()
-mcsim_version()  
 ```
 
 ```{r, include=FALSE}

@@ -38,10 +38,6 @@ Check the software package version that will be used in this example.
 devtools::session_info()
 ```
 
-```{r}
-mcsim_version()  
-```
-
 ## MonteCarlo()
 
 Use `one_mtc.in.R` to conduct Monte Carlo analysis
