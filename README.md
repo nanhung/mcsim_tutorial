@@ -3,7 +3,7 @@
 
 ## Instrction
 
-The tutorial to run GNU MCsim under R(Studio) 
+The tutorial to run GNU MCSim under R(Studio) 
 
 - Use "mcsim_tutorial.Rproj" to open the R project.
 - All materials were written in [R Markdown](https://rmarkdown.rstudio.com/).
