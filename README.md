@@ -8,7 +8,8 @@ The tutorial to run GNU MCsim under R(Studio)
 - Be sure to pre-install the necessary R packages as follow.
 
 ```
-pkgs <- c("rmarkdown", "xaringan","httk", "devtools", "tidyverse", "pksensi", "sensitivity", "rstan", "bayesplot", "hexbin", "corrplot")
+pkgs <- c("rmarkdown", "xaringan","httk", "devtools", "tidyverse", 
+"pksensi", "sensitivity", "rstan", "bayesplot", "hexbin", "corrplot")
 install.packages(pkgs)
 ```
 
@@ -30,10 +31,10 @@ Tutorial 1: Walk-through of working models
 
 [Slides](https://nanhung.rbind.io/slide/190425_tutorial.html#1) [Demo](https://rpubs.com/Nanhung/Demo_190425) 
 
-Tutorial 2
+Tutorial 2: Uncertainty and senitivity analysis
 
-[Slides](Tutorial 0: GNU MCSim Introductory) [Demo](https://rpubs.com/Nanhung/Demo_190516) [Supplementary](https://rpubs.com/Nanhung/Suppl_190516)
+[Slides](https://nanhung.rbind.io/slide/190516_tutorial.html#1) [Demo](https://rpubs.com/Nanhung/Demo_190516) [Supplementary](https://rpubs.com/Nanhung/Suppl_190516)
 
-Tutorial 3
+Tutorial 3: Markov Chain Monte Marlo Calibration
 
 [Slides](https://nanhung.rbind.io/slide/190523_tutorial.html#1) [Demo](https://rpubs.com/Nanhung/Demo_190523) [Supplementary](https://rpubs.com/Nanhung/Suppl_190523)
