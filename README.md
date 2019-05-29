@@ -1,6 +1,6 @@
 # [**DOWNLOAD**](https://github.com/nanhung/mcsim_tutorial/archive/v1.0.0.zip)
 
-## Instrction
+## Instruction
 
 The tutorial to run GNU MCSim under R(Studio) 
 
